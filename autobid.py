@@ -11,8 +11,8 @@ import sys
 
 _debug = False
 
-conf = yaml.load(open('config.yaml'))
-header = {'user-agent': UA}
+conf = yaml.load(open(os.path.join(os.path.dirname(__file__),'config.yaml')))
+header = {'user-agent': conf['ua']}
 body = {
     'j_username': conf['username'],
     'j_password': conf['password'],

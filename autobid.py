@@ -11,13 +11,11 @@ import sys
 
 _debug = False
 
-UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10.7; rv:18.0) Gecko/20100101 Firefox/18.0'
+conf = yaml.load(open('config.yaml'))
 header = {'user-agent': UA}
-
-user = yaml.load(open('config.yaml'))
 body = {
-    'j_username': user['username'],
-    'j_password': user['password'],
+    'j_username': conf['username'],
+    'j_password': conf['password'],
     'returnUrl': 'null',
     'targetUrl': '',
 }

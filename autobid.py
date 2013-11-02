@@ -7,144 +7,24 @@ import yaml
 import os
 import webbrowser
 from readbot import ReadBot
-import sys
+import json
 
 _debug = False
 
-conf = yaml.load(open(os.path.join(os.path.dirname(__file__),'config.yaml')))
-header = {'user-agent': conf['ua']}
-body = {
-    'j_username': conf['username'],
-    'j_password': conf['password'],
-    'returnUrl': 'null',
-    'targetUrl': '',
-}
 
 _keys = ('title', 'company', 'user', 'category', 'money', 'interest', 'months', 'progress')
 
 _rrd_url = 'http://www.renrendai.com'
-_rrd_url_login = os.path.join(_rrd_url, 'j_spring_security_check')
-_rrd_url_loanlist = os.path.join(_rrd_url, 'lend', 'loanList.action') + '?id=all_biao_list'
 _rrd_url_loadpage = os.path.join(_rrd_url, 'lend', 'detailPage.action') + '?loanId=%s'
-_rrd_url_bidpage = os.path.join(_rrd_url, 'lend', 'bidPageAction.action') + '?loanId=%s'
-_rrd_url_loanpost = os.path.join(_rrd_url, 'lend', 'loanLender.action')
-_rrd_url_codeimg = os.path.join(_rrd_url, 'image.jsp')
 
 def safe_mkdir(dir):
     if not os.path.isdir(dir):
         os.makedirs(dir)
 
-_base_dir = '/tmp/rrd'
-safe_mkdir(_base_dir)
-_code_img = os.path.join(_base_dir, 'code.jpeg')
-_code_img_back_dir = os.path.join(_base_dir, 'img')
-safe_mkdir(_code_img_back_dir)
-_err_html_dir = os.path.join(_base_dir, 'errhtml')
-safe_mkdir(_err_html_dir)
-
-bidlist_file = os.path.join(_base_dir, 'bidlist')
-log_file = os.path.join(_base_dir, 'rrd.log')
-
 _success_string = u'恭喜您，投标成功！'
 
-def autobid():
-    logprint('='*30, '')
-    logprint(_debug, 'debug')
-    # init cookies
-    resp = httprequest('get', _rrd_url, headers=header)
-    # login
-    resp = httprequest('post', _rrd_url_login, data=body, headers=header, cookies=resp.cookies, allow_redirects=False)
-    cookie = resp.cookies
-    # 请求贷款列表
-    resp = httprequest('get', _rrd_url_loanlist, headers=header, cookies=cookie)
-    # 提取贷款信息
-    page = etree.HTML(resp.text)
-    hrefs = page.xpath(u'//div[@class="center biaoli"]')
-
-    cookies = resp.cookies
-    data = []
-    for href in hrefs:
-        i = 0
-        d = {'id': href.get('id')}
-        for t in href.itertext():
-            t = t.strip()
-            if t and t[0] == u'￥':
-                # 如果text以￥开头，设置list 顺序为4
-                # 防止前面某些项为空导致顺序混乱出错
-                i = 4
-            if t and i < len(_keys): # 超过keys长度的值不再处理
-                # 格式化text的值
-                k = _keys[i]
-                if k == 'money':
-                    t = t[1:].replace(',', '')
-                elif k == 'interest':
-                    t = t[:-1]
-                elif k == 'months':
-                    t = t[:-2]
-                elif k == 'progress':
-                    t = t[:-1]
-                d[_keys[i]] = t
-                i += 1
-        data.append(d)
-        # progress 字段值不是数字的处理(等待材料的情况)
-        if not d['progress'].isdigit():
-            continue
-        if check_bid_worth(d):
-            # should bid
-            '''bid form:
-            surplusAmount
-            bidAmount 50
-            security_session
-            timestamp
-            loanId
-            '''
-            loanid = d['id'][4:]
-            if os.path.isfile(bidlist_file):
-                bidlist = yaml.load(open(bidlist_file, 'r').read())
-            else:
-                bidlist = []
-            if loanid not in bidlist:
-                # 不在投资列表里，可以进行投资
-                logprint('@'*30, '')
-                logprint('begin bid...')
-                logprint(loanid)
-
-                #resp1 = requests.get(_rrd_url_bidpage % (loanid), headers=header, cookies=cookies)
-                resp_codeimg = httprequest('get', _rrd_url_codeimg, headers=header, cookies=cookies)
-                with open(_code_img, 'wb') as pf:
-                    pf.write(resp_codeimg.content)
-
-                code = ocr_rec(_code_img)
-
-                body_data = {
-                    'surplusAmount': int(d['money'])*(100-int(d['progress']))/100,
-                    'bidAmount': calc_bid_value(d),
-                    'security_session': cookies['JSESSIONID'],
-                    'timestamp': int(time.time()),
-                    'loanId': loanid,
-                    'code': code,
-                }
-                resp = httprequest('post', _rrd_url_loanpost, data=body_data, headers=header, cookies=cookies)
-                logprint(_success_string in resp.text)
-                if _success_string in resp.text:
-                    bidlist.append(loanid)
-                    yaml.dump(bidlist, open(bidlist_file, 'w'))
-                else:
-                    with open(os.path.join(_err_html_dir, '%s.html' % (loanid)), 'w') as pf:
-                        pf.write(resp.text.encode('utf8'))
-                    #with open(os.path.join(_code_img_back_dir, '%s.jpeg' % (code)), 'wb') as pf:
-                    #    pf.write(open(_code_img, 'rb').read())
-
-
-            logstr = '%s|%s|%s|%s|%s' % (d['id'], d['title'], d['money'], d['interest'], d['months'])
-            with open(log_file, 'a') as f:
-                f.write(logstr.encode('utf8')+'\n')
-            logprint(logstr)
-            logprint('-'*30, '')
-    logprint('+'*30, '')
-
 def check_bid_worth(data):
-    if float(data['interest']) >= 14 and int(data['progress']) < 100:
+    if float(data['interest']) >= 15 and int(data['progress']) < 100 and int(data['months']) < 24:
         return True
     else:
         return False
@@ -155,20 +35,14 @@ def calc_bid_value(data):
     else:
         return 50
 
-def httprequest(method, url, *args, **kwargs):
-    resp = requests.request(method, url, *args, **kwargs)
-    if resp.status_code >=400:
-        raise Exception('http can not response normally(%s)' % (resp.status_code))
-    logprint(resp.cookies, 'debug')
-    return resp
-
 def toggle_open_browser(loadid):
     url = _rrd_url_loadpage % (loadid)
     webbrowser.open(url)
 
 def ocr_rec(imgfile):
     rb = ReadBot()
-    rb.ocr_config = ['digits']
+    #rb.ocr_config = ['digits']
+    rb.ocr_config = ['alnums']
     result = rb.interpret(imgfile)
     return result
 
@@ -182,17 +56,194 @@ def logprint(data, info_head='info'):
         return
     print logstr
 
+BASE_URL = 'http://www.renrendai.com'
+class AutoBid(object):
+    _keys = ('title', 'company', 'user', 'category', 'money', 'interest', 'months', 'progress')
+    cookies = None
+    urls = {
+        'index': BASE_URL,
+        'login': os.path.join(BASE_URL, 'j_spring_security_check'),
+        'list': os.path.join(BASE_URL, 'lend', 'loanList!json.action'),
+        'post': os.path.join(BASE_URL, 'lend', 'loanLender.action'),
+        'codeimg': os.path.join(BASE_URL, 'image.jsp')
+        #'detail': os.path.join(BASE_URL, 'lend', 'detailPage.action') + '?loanId=%s',
+    }
+    success_string = u'恭喜您，投标成功！'
+
+    def __init__(self, config_file=None):
+        logprint('AutoBid init...', 'debug')
+        if config_file is None:
+            config_file = os.path.join(os.path.dirname(__file__),'config.yaml')
+        if not os.path.isfile(config_file):
+            exit('配置文件不存在(%s)' % (config_file))
+        conf = yaml.load(open(config_file))
+        logprint(conf, 'debug')
+        self.ua = conf['ua']
+        self.header = {'user-agent': conf['ua']}
+        self.username = conf['username']
+        self.password = conf['password']
+        self.headers = {'user-agent': conf['ua']}
+        # 初始化目录空间
+        _base_dir = '/tmp/rrd'
+        safe_mkdir(_base_dir)
+        self._code_img = os.path.join(_base_dir, 'code.jpeg')
+        self._code_img_back_dir = os.path.join(_base_dir, 'img')
+        safe_mkdir(self._code_img_back_dir)
+        self._err_html_dir = os.path.join(_base_dir, 'errhtml')
+        safe_mkdir(self._err_html_dir)
+
+        self.bidlist_file = os.path.join(_base_dir, 'bidlist')
+        self.log_file = os.path.join(_base_dir, 'rrd.log')
+
+        self.init_cookies()
+        self.login()
+
+    def httpreq(self, method, urlkey, *args, **kwargs):
+        logprint('http request: %s' % (urlkey), 'debug')
+        if urlkey not in self.urls:
+            raise Exception('key(%s) not in urls' % (urlkey))
+        url = self.urls[urlkey]
+        kwargs['headers'] = self.headers
+        if self.cookies is not None:
+            kwargs['cookies'] = self.cookies
+        #logprint(kwargs, 'debug')
+        resp = requests.request(method, url, *args, **kwargs)
+        if resp.status_code >=400:
+            raise Exception('http can not response normally(%s)' % (resp.status_code))
+        #logprint(resp.cookies, 'debug')
+        return resp
+
+    def init_cookies(self):
+        resp = self.httpreq('get', 'index')
+        self.cookies = resp.cookies
+
+    @property
+    def bidlist(self):
+        if os.path.isfile(self.bidlist_file):
+            try:
+                bidlist = yaml.load(open(self.bidlist_file).read())
+            except:
+                bidlist = []
+        else:
+            bidlist = []
+        return bidlist
+
+    @bidlist.setter
+    def bidlist(self, val):
+        bidlist = self.bidlist
+        bidlist.append(val)
+        yaml.dump(bidlist, open(self.bidlist_file, 'w'))
+
+    def bid_info_format(self, data):
+        d = {
+            'id': data['loanId'],
+            'title': data['title'],
+            'company': '',
+            'user': data['nickName'],
+            'category': '',
+            'money': data['amount'],
+            'interest': data['interest'],
+            'months': data['months'],
+            'progress': data['finishedRatio'],
+        }
+        return d
+
+    def find_bid(self):
+        # 请求贷款列表
+        resp = self.httpreq('get', 'list')
+        # 提取贷款信息
+        try:
+            datas = json.loads(resp.text).get('data').get('loans', [])
+        except:
+            datas = []
+        for data in datas:
+            d = self.bid_info_format(data)
+            logprint('%(id)s %(title)s %(money)s %(months)s %(interest)s %(progress)s' % d, 'debug')
+            # progress 字段值不是数字的处理(等待材料的情况)
+            if not isinstance(d['progress'], float) and not d['progress'].isdigit():
+                continue
+            if check_bid_worth(d):
+                # already bided check
+
+                print self.bidlist
+                if d['id'] not in self.bidlist:
+                    ## auto bid
+                    #ret = self.post_bid(d)
+                    #if ret:
+                    #    self.bidlist = d['id']
+
+                    # open brower for bid
+                    self.bidlist = d['id']
+                    toggle_open_browser(d['id'])
+
+    def login(self):
+        login_body = {
+            'j_username': self.username,
+            'j_password': self.password,
+            'rememberme': 'on',
+            'returnUrl': BASE_URL,
+            'targetUrl': '',
+        }
+        resp = self.httpreq('post', 'login', data=login_body, allow_redirects=False)
+        self.cookies = resp.cookies
+
+    def post_bid(self, bid_info):
+        self.login()
+        resp_codeimg = self.httpreq('get', 'codeimg')
+        with open(self._code_img, 'wb') as pf:
+            pf.write(resp_codeimg.content)
+        code = ocr_rec(self._code_img)
+
+        body_data = {
+                #'surplusAmount': int(bid_info['money'])*(100-int(bid_info['progress']))/100,
+                #'security_session': self.cookies['JSESSIONID'],
+                #'timestamp': int(time.time()),
+            'code': code,
+            'agree-contract': 'on',
+            'loanId': bid_info['id'],
+            'bidAmount': calc_bid_value(bid_info),
+        }
+        resp = self.httpreq('post', 'post', data=body_data)
+        if self.success_string in resp.text:
+            return True
+        else:
+            return False
+
+class AutobidTest():
+    def __init__(self):
+        self.autobid = AutoBid()
+
+    def test_ocr(self):
+        resp_codeimg = self.autobid.httpreq('get', 'codeimg')
+        with open(self.autobid._code_img, 'wb') as pf:
+            pf.write(resp_codeimg.content)
+        code = ocr_rec(self.autobid._code_img)
+        print code
+
+
 if __name__ == '__main__':
+    import sys
     import time
     if len(sys.argv) == 2 and sys.argv[1] == 'debug':
         _debug = True
-        autobid()
+        # test ocr
+        #t = AutobidTest()
+        #t.test_ocr()
+        #exit()
+
+        auto_bid = AutoBid()
+        for i in range(1):
+            auto_bid.find_bid()
+            #auto_bid.login()
+            #print auto_bid.cookies
+
     else:
+        auto_bid = AutoBid()
         while True:
             print time.strftime('%Y-%m-%d %H:%M:%S')
             begin_t = time.time()
             try:
-                autobid()
+                auto_bid.find_bid()
             except SystemExit:
                 exit()
             except:

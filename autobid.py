@@ -158,7 +158,9 @@ class AutoBid(object):
             datas = []
         for data in datas:
             d = self.bid_info_format(data)
-            logprint('%(id)s %(title)s %(money)s %(months)s %(interest)s %(progress)s' % d, 'debug')
+            logprint('%(id)s %(months)2s %(interest)5s %(progress)7s %(title)s %(money)s' % d, 'debug')
+            if int(d['progress']) != 100:
+                logprint('%(id)s %(months)2s %(interest)5s %(progress)7s %(title)s %(money)s' % d, 'info')
             # progress 字段值不是数字的处理(等待材料的情况)
             if not isinstance(d['progress'], float) and not d['progress'].isdigit():
                 continue

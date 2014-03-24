@@ -8,6 +8,8 @@ import os
 import webbrowser
 from readbot import ReadBot
 import json
+import Tkinter as tk
+from PIL import Image, ImageTk
 
 _debug = False
 
@@ -24,7 +26,7 @@ def safe_mkdir(dir):
 _success_string = u'恭喜您，投标成功！'
 
 def check_bid_worth(data):
-    if float(data['interest']) >= 15 and int(data['progress']) < 100 and int(data['months']) < 24:
+    if float(data['interest']) >= 15 and int(data['progress']) < 100 and int(data['months']) < 18:
         return True
     else:
         return False
@@ -40,11 +42,16 @@ def toggle_open_browser(loadid):
     webbrowser.open(url)
 
 def ocr_rec(imgfile):
-    rb = ReadBot()
-    #rb.ocr_config = ['digits']
-    rb.ocr_config = ['alnums']
-    result = rb.interpret(imgfile)
-    return result
+    #rb = ReadBot()
+    ##rb.ocr_config = ['digits']
+    #rb.ocr_config = ['alnums']
+    #result = rb.interpret(imgfile)
+    #return result
+
+    # 手动输入验证码
+    obj = Captcha(imgfile)
+    obj.dialog()
+    return obj.value
 
 def logprint(data, info_head='info'):
     if info_head:
@@ -55,6 +62,33 @@ def logprint(data, info_head='info'):
     if not _debug and info_head.lower() == 'debug':
         return
     print logstr
+
+class Captcha():
+    def __init__(self, imgpath):
+        self.imgpath = imgpath
+        self.value = ''
+
+    def get_value(self, event):
+        self.value = event.widget.get()
+        event.widget.master.destroy()
+
+    def dialog(self):
+        win = tk.Tk()
+        win.geometry('300x300+300+200')
+
+        im = Image.open(self.imgpath)
+        tkimage = ImageTk.PhotoImage(im)
+        label = tk.Label(win, image=tkimage)
+        label.pack() # pady=10)
+        entry = tk.Entry(win, text='输入')
+        entry.pack()
+        entry.focus()
+        entry.bind('<Key-Return>', self.get_value)
+
+        win.wm_attributes("-topmost", 1)
+        win.focus_force()
+        win.mainloop()
+
 
 BASE_URL = 'http://www.renrendai.com'
 class AutoBid(object):
@@ -100,14 +134,14 @@ class AutoBid(object):
 
     def httpreq(self, method, urlkey, *args, **kwargs):
         logprint('http request: %s' % (urlkey), 'debug')
+        if getattr(self, 'r', None) is None:
+            self.r = requests.Session()
         if urlkey not in self.urls:
             raise Exception('key(%s) not in urls' % (urlkey))
         url = self.urls[urlkey]
         kwargs['headers'] = self.headers
-        if self.cookies is not None:
-            kwargs['cookies'] = self.cookies
         #logprint(kwargs, 'debug')
-        resp = requests.request(method, url, *args, **kwargs)
+        resp = self.r.request(method, url, *args, **kwargs)
         if resp.status_code >=400:
             raise Exception('http can not response normally(%s)' % (resp.status_code))
         #logprint(resp.cookies, 'debug')
@@ -115,7 +149,6 @@ class AutoBid(object):
 
     def init_cookies(self):
         resp = self.httpreq('get', 'index')
-        self.cookies = resp.cookies
 
     @property
     def bidlist(self):
@@ -169,14 +202,14 @@ class AutoBid(object):
 
                 print self.bidlist
                 if d['id'] not in self.bidlist:
-                    ## auto bid
-                    #ret = self.post_bid(d)
-                    #if ret:
-                    #    self.bidlist = d['id']
+                    # auto bid
+                    ret = self.post_bid(d)
+                    if ret:
+                        self.bidlist = d['id']
 
-                    # open brower for bid
-                    self.bidlist = d['id']
-                    toggle_open_browser(d['id'])
+                    ### open brower for bid
+                    ##self.bidlist = d['id']
+                    ##toggle_open_browser(d['id'])
 
     def login(self):
         login_body = {
@@ -252,6 +285,6 @@ if __name__ == '__main__':
                 __import__('traceback').print_exc()
             end_t = time.time()
             print "execute time: (%s)\n" % (end_t - begin_t)
-            time.sleep(20)
+            time.sleep(10)
 
 

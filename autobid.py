@@ -3,6 +3,7 @@
 
 import requests
 from lxml import etree
+from pyquery import PyQuery
 import yaml
 import os
 import webbrowser
@@ -10,11 +11,11 @@ from readbot import ReadBot
 import json
 import Tkinter as tk
 from PIL import Image, ImageTk
+import codecs
 
 _debug = False
 
 
-_keys = ('title', 'company', 'user', 'category', 'money', 'interest', 'months', 'progress')
 
 _rrd_url = 'http://www.renrendai.com'
 _rrd_url_loadpage = os.path.join(_rrd_url, 'lend', 'detailPage.action') + '?loanId=%s'
@@ -22,8 +23,6 @@ _rrd_url_loadpage = os.path.join(_rrd_url, 'lend', 'detailPage.action') + '?loan
 def safe_mkdir(dir):
     if not os.path.isdir(dir):
         os.makedirs(dir)
-
-_success_string = u'恭喜您，投标成功！'
 
 def check_bid_worth(data):
     if float(data['interest']) >= 15 and int(data['progress']) < 100 and int(data['months']) < 18:
@@ -70,6 +69,7 @@ class Captcha():
 
     def get_value(self, event):
         self.value = event.widget.get()
+        event.widget.master.quit()
         event.widget.master.destroy()
 
     def dialog(self):
@@ -99,7 +99,8 @@ class AutoBid(object):
         'login': os.path.join(BASE_URL, 'j_spring_security_check'),
         'list': os.path.join(BASE_URL, 'lend', 'loanList!json.action'),
         'post': os.path.join(BASE_URL, 'lend', 'loanLender.action'),
-        'codeimg': os.path.join(BASE_URL, 'image.jsp')
+        'codeimg': os.path.join(BASE_URL, 'image.jsp'),
+        'account': os.path.join(BASE_URL, 'account', 'index.action'),
         #'detail': os.path.join(BASE_URL, 'lend', 'detailPage.action') + '?loanId=%s',
     }
     success_string = u'恭喜您，投标成功！'
@@ -131,6 +132,13 @@ class AutoBid(object):
 
         self.init_cookies()
         self.login()
+
+    def execute(self):
+        if self.money_available() < 50:
+            logprint('account money rest: %s' % (self.money_avail))
+            return
+        logprint('account money rest: %s continue' % (self.money_avail))
+        self.find_bid()
 
     def httpreq(self, method, urlkey, *args, **kwargs):
         logprint('http request: %s' % (urlkey), 'debug')
@@ -166,6 +174,22 @@ class AutoBid(object):
         bidlist = self.bidlist
         bidlist.append(val)
         yaml.dump(bidlist, open(self.bidlist_file, 'w'))
+
+    def money_available(self):
+        resp = self.httpreq('get', 'account')
+        pq = PyQuery(resp.text)
+        item = pq('span').filter(lambda i: PyQuery(this).text() == u'可用金额')
+        if item:
+            p = item.nextAll()
+            money_avail = p('em').text()
+            try:
+                money_avail = float(money_avail)
+            except:
+                money_avail = 0
+        else:
+            money_avail = 0
+        self.money_avail = money_avail
+        return money_avail
 
     def bid_info_format(self, data):
         d = {
@@ -239,6 +263,10 @@ class AutoBid(object):
             'bidAmount': calc_bid_value(bid_info),
         }
         resp = self.httpreq('post', 'post', data=body_data)
+        with codecs.open(os.path.join(self._err_html_dir, '%s.html' % (bid_info['id'])), 'w', encoding='utf8') as pf:
+            pf.write(str(resp.headers))
+            pf.write(resp.text)
+        return True
         if self.success_string in resp.text:
             return True
         else:
@@ -267,6 +295,8 @@ if __name__ == '__main__':
         #exit()
 
         auto_bid = AutoBid()
+        auto_bid.money_available()
+        exit(1)
         for i in range(1):
             auto_bid.find_bid()
             #auto_bid.login()
@@ -278,7 +308,7 @@ if __name__ == '__main__':
             print time.strftime('%Y-%m-%d %H:%M:%S')
             begin_t = time.time()
             try:
-                auto_bid.find_bid()
+                auto_bid.execute()
             except SystemExit:
                 exit()
             except:

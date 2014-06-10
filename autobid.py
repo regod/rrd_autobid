@@ -131,14 +131,20 @@ class AutoBid(object):
         self.log_file = os.path.join(_base_dir, 'rrd.log')
 
         self.init_cookies()
-        self.login()
+        #self.login()
 
     def execute(self):
-        if self.money_available() < 50:
-            logprint('account money rest: %s' % (self.money_avail))
-            return
-        logprint('account money rest: %s continue' % (self.money_avail))
-        self.find_bid()
+        for bid_data in self.find_bid():
+            self.login() # 登录
+            # 判断可用资金是否足够
+            if self.money_available() < 50:
+                logprint('account money rest: %s' % (self.money_avail))
+                continue
+            logprint('account money rest: %s continue' % (self.money_avail))
+
+            ret = self.post_bid(bid_data)
+            if ret:
+                self.bidlist = bid_data['id']
 
     def httpreq(self, method, urlkey, *args, **kwargs):
         logprint('http request: %s' % (urlkey), 'debug')
@@ -221,19 +227,9 @@ class AutoBid(object):
             # progress 字段值不是数字的处理(等待材料的情况)
             if not isinstance(d['progress'], float) and not d['progress'].isdigit():
                 continue
-            if check_bid_worth(d):
+            if check_bid_worth(d) and d['id'] not in self.bidlist:
                 # already bided check
-
-                print self.bidlist
-                if d['id'] not in self.bidlist:
-                    # auto bid
-                    ret = self.post_bid(d)
-                    if ret:
-                        self.bidlist = d['id']
-
-                    ### open brower for bid
-                    ##self.bidlist = d['id']
-                    ##toggle_open_browser(d['id'])
+                yield d
 
     def login(self):
         login_body = {
@@ -247,7 +243,6 @@ class AutoBid(object):
         self.cookies = resp.cookies
 
     def post_bid(self, bid_info):
-        self.login()
         resp_codeimg = self.httpreq('get', 'codeimg')
         with open(self._code_img, 'wb') as pf:
             pf.write(resp_codeimg.content)
